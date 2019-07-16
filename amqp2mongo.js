@@ -53,6 +53,20 @@ function startConsumeMessage(db) {
         console.error(' [-] RabbitMQ Channel creation failed: ' + err);
         process.exit(1);
       }
+      ch.on('error', (err) => {
+        if (err == undefined) {
+          err = 'no reaason given';
+        }
+        console.error(' [-] RabbitMQ Channel error received: ' + err);
+        // close is emitted after error
+      });
+      ch.on('close', (err) => {
+        if (err == undefined) {
+          err = 'no reaason given';
+        }
+        console.error(' [-] RabbitMQ Channel closed. (' + err + ')');
+        process.exit(1);
+      });
       // Sweet spot ~ 25 - 50
       ch.prefetch(10);
       ch.assertQueue(process.env.RABBITMQ_CONS_QUEUE, {exclusive: false}, function(err, q) {
