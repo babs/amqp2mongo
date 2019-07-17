@@ -46,6 +46,20 @@ function startConsumeMessage(db) {
       console.error(' [-] RabbitMQ connection failed: ' + err);
       process.exit(1);
     }
+    conn.on('error', (err) => {
+      if (err == undefined) {
+        err = 'no reason given';
+      }
+      console.error(' [-] RabbitMQ Connection error received: ' + err);
+      // close is emitted after error
+    });
+    conn.on('close', (err) => {
+      if (err == undefined) {
+        err = 'no reason given';
+      }
+      console.error(' [-] RabbitMQ Connection closed. (' + err + ')');
+      process.exit(1);
+    });
     console.info(' [2/2] Connected to RabbitMQ');
     console.info(' [+] All connetion established');
     conn.createConfirmChannel(function(err, ch) {
@@ -55,17 +69,16 @@ function startConsumeMessage(db) {
       }
       ch.on('error', (err) => {
         if (err == undefined) {
-          err = 'no reaason given';
+          err = 'no reason given';
         }
         console.error(' [-] RabbitMQ Channel error received: ' + err);
         // close is emitted after error
       });
       ch.on('close', (err) => {
         if (err == undefined) {
-          err = 'no reaason given';
+          err = 'no reason given';
         }
         console.error(' [-] RabbitMQ Channel closed. (' + err + ')');
-        process.exit(1);
       });
       // Sweet spot ~ 25 - 50
       ch.prefetch(10);
