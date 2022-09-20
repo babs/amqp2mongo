@@ -5,7 +5,7 @@
     "repository": "",
     "bin": {
         "amqp2mongo": "amqp2mongo.js"
-      },
+    },
     "dependencies": {
         "amqplib": "^0.5.3",
         "console-stamp": "^0.2.7",
