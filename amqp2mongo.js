@@ -112,7 +112,7 @@ function startConsumeMessage(db) {
               stack: e.stack,
             };
           }
-          db.collection(process.env.MONGOCOLLECTION).insertOne(document);
+          db.collection(process.env.MONGOCOLLECTION).insertOne(document, {checkKeys: false});
           // console.dir(document);
           ch.ack(msg);
         });
