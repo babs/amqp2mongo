@@ -1,0 +1,11 @@
+services:
+  amqp2mongo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+     - .env
+    volumes:
+      - ./.env:/app/.env:ro
+#      - /tmp/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
