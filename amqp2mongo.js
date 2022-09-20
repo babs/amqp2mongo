@@ -51,7 +51,7 @@ function startConsumeMessage(db) {
         err = 'no reason given';
       }
       console.error(' [-] RabbitMQ Connection error received: ' + err);
-      // close is emitted after error
+      process.exit(1);
     });
     conn.on('close', (err) => {
       if (err == undefined) {
@@ -72,13 +72,14 @@ function startConsumeMessage(db) {
           err = 'no reason given';
         }
         console.error(' [-] RabbitMQ Channel error received: ' + err);
-        // close is emitted after error
+        process.exit(1);
       });
       ch.on('close', (err) => {
         if (err == undefined) {
           err = 'no reason given';
         }
         console.error(' [-] RabbitMQ Channel closed. (' + err + ')');
+        process.exit(1);
       });
       // Sweet spot ~ 25 - 50
       ch.prefetch(10);
