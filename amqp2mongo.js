@@ -67,7 +67,7 @@ const startConsumeMessage = db => {
       process.exit(1);
     });
     console.info(' [2/2] Connected to RabbitMQ');
-    console.info(' [+] All connetion established');
+    console.info(' [+] All connections established');
     setInterval(() => { console.info(`message processed: ${JSON.stringify(counters)}`); }, 60000);
     conn.createConfirmChannel((err, ch) => {
       if (err) {
