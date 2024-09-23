@@ -1,8 +1,8 @@
 {
     "name": "amqp2mongo",
-    "version": "0.0.1",
-    "description": "",
-    "repository": "",
+    "version": "1.1.0",
+    "description": "Connects to a rabbitmq server, declare queue and bindings to the given exchange and consume messages, saving them to a mongodb collection",
+    "repository": "https://github.com/babs/amqp2mongo",
     "bin": {
         "amqp2mongo": "amqp2mongo.js"
     },

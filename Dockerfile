@@ -1,10 +1,12 @@
-FROM node:16
+FROM node:20
 
 WORKDIR /app
 
-COPY amqp2mongo.js package*.json Dockerfile yarn.lock ./
+COPY amqp2mongo.js package*.json Dockerfile ./
 
 RUN set -e \
-  && yarn install
+  && npm ci
 
-CMD ["node", "amqp2mongo.js"]
+USER node
+
+CMD ["amqp2mongo.js"]
