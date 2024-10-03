@@ -91,6 +91,11 @@ const startConsumeMessage = db => {
       // Sweet spot ~ 25 - 50
       ch.prefetch(10);
       ch.assertQueue(process.env.RABBITMQ_CONS_QUEUE, { exclusive: false }, (err, q) => {
+        if (err) {
+          console.error(' [-] RabbitMQ Queue assertion failed: ' + err);
+          process.exit(1);
+        }
+
         console.info(' [*] Waiting for msgs. To exit press CTRL+C');
 
         process.env.RABBITMQ_CONS_ROUTING_KEYS.split(',').forEach((key) => {
