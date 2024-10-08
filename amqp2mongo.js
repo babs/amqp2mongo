@@ -111,9 +111,6 @@ const startConsumeMessage = db => {
           };
           removeEmpty(document.fields);
           removeEmpty(document.properties);
-          if (document.properties.headers.timestamp_in_ms) {
-            document.messageDate = new Date(document.properties.headers.timestamp_in_ms);
-          }
 
           try {
             document.content = JSON.parse(msg.content);
