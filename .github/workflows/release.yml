@@ -1,0 +1,272 @@
+name: "Build OCI Image"
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One in-flight run per ref: re-pushing or re-dispatching the same tag cancels
+# the stale run instead of racing it onto the shared floating tags.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REPOS: "ghcr.io/babs/amqp2mongo"
+
+jobs:
+  test:
+    name: "Lint + E2E"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      mongo:
+        image: mongo:5.0          # MongoDB 5.0 API == the DocDB 5.0 target
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1}).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      rabbitmq:
+        image: rabbitmq:3.13-management
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      RABBITMQ_URL: "amqp://guest:guest@localhost:5672/%2F?heartbeat=30"
+      MONGODB: "mongodb://localhost:27017/amqp2mongo?retryWrites=false"
+      RABBITMQ_CONS_EXCH: "consume"
+      RABBITMQ_CONS_QUEUE: "e2e.all-msgs"
+      RABBITMQ_CONS_ROUTING_KEYS: "#"
+      MONGOCOLLECTION: "amqp2mongo"
+      PREFETCH: "200"            # drain 10k fast against a local mongo
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - run: npm ci
+
+      - name: Lint + syntax
+        run: |
+          npm run check
+          npm run lint
+
+      - name: E2E — 10k messages through the bridge
+        run: |
+          set -euo pipefail
+          node test/e2e.js setup
+          node amqp2mongo.js > bridge.log 2>&1 &
+          BRIDGE=$!
+          for i in $(seq 1 30); do
+            grep -q 'Waiting for msgs' bridge.log && break
+            # surface a crash early instead of waiting the full loop
+            kill -0 "$BRIDGE" 2>/dev/null || { echo "bridge exited during startup"; cat bridge.log; exit 1; }
+            sleep 1
+          done
+          grep -q 'Waiting for msgs' bridge.log || { echo "bridge not ready"; cat bridge.log; exit 1; }
+          node test/e2e.js publish 10000
+          node test/e2e.js verify 10000
+          kill "$BRIDGE" 2>/dev/null || true
+
+  build-image:
+    name: "Build OCI image"
+    needs: test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30          # fail fast instead of hanging the 360 min default
+    permissions:
+      contents: read
+      packages: write
+      id-token: write          # keyless cosign (Fulcio needs the OIDC token)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            os: ubuntu-latest
+          - platform: linux/arm64
+            os: ubuntu-24.04-arm
+    outputs:
+      RAW_IMG_TAGS: ${{ steps.define-targets.outputs.RAW_IMG_TAGS }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Define TARGETS
+        id: define-targets
+        run: |
+          PLATFORM=${{ matrix.platform }}
+          PLATFORM_PAIR=${PLATFORM//\//-}
+          echo "PLATFORM_PAIR=$PLATFORM_PAIR" | tee -a $GITHUB_OUTPUT >> $GITHUB_ENV
+
+          IMG_TAGS="latest"
+
+          if [ ${GITHUB_REF_TYPE:-} == 'tag' -a -n "$(echo $GITHUB_REF_NAME | grep -iE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.-]+)?$')" ]; then
+            TAG=${GITHUB_REF_NAME#v}
+            RELEASE=""
+            case "$TAG" in
+              *-*)
+                RELEASE="-${TAG#*-}"
+                ;;
+            esac
+            SEMVER_CORE="${TAG%%-*}"
+            IMG_TAGS="${IMG_TAGS} $TAG ${SEMVER_CORE%.*}${RELEASE} ${SEMVER_CORE%%.*}${RELEASE}"
+          fi
+          echo RAW_IMG_TAGS="$IMG_TAGS" | tee -a $GITHUB_OUTPUT >> $GITHUB_ENV
+
+          echo "Targets:"
+          TARGETS=""
+          for REPO in $REPOS; do
+            for IMG_TAG in $IMG_TAGS; do
+              TARGETS="${TARGETS},${REPO}:${IMG_TAG}-$PLATFORM_PAIR"
+              echo "- ${REPO}:${IMG_TAG}-$PLATFORM_PAIR"
+            done
+          done
+          echo TARGETS=${TARGETS#,} | tee -a $GITHUB_OUTPUT >> $GITHUB_ENV
+
+          VERSION=${VERSION:-$GITHUB_REF_NAME}
+          VERSION=${VERSION:-v0.0.0}
+          COMMIT_HASH="$(git rev-parse --short HEAD 2>/dev/null)"
+          COMMIT_HASH=${COMMIT_HASH:-00000000}
+          DIRTY=$(git diff --quiet 2>/dev/null || echo '-dirty')
+          echo "VERSION=${VERSION}" | tee -a $GITHUB_OUTPUT >> $GITHUB_ENV
+          echo "COMMIT_HASH=${COMMIT_HASH}${DIRTY}" | tee -a $GITHUB_OUTPUT >> $GITHUB_ENV
+          echo "BUILD_TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a $GITHUB_OUTPUT >> $GITHUB_ENV
+
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build-and-push
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            COMMIT_HASH=${{ env.COMMIT_HASH }}
+            BUILD_TIMESTAMP=${{ env.BUILD_TIMESTAMP }}
+            PROJECT_URL=${{ github.event.repository.html_url }}
+            BUILDER=github-actions/${{ runner.os }}-${{ runner.arch }}
+          # GHA cache scoped per-platform so amd64/arm64 don't evict each other.
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+          push: true
+          tags: ${{ env.TARGETS }}
+          platforms: ${{ matrix.platform }}
+          # SLSA provenance + SBOM embedded in the OCI index. NOTE: this makes
+          # each build push an INDEX, which is why merge-images must use
+          # `docker buildx imagetools` (not `docker manifest`) below.
+          provenance: mode=max
+          sbom: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Sign published images (keyless, Fulcio+Rekor)
+        # All tags from this build share one content digest, so one signature
+        # per digest covers every per-platform tag, in every registry.
+        env:
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          retry() { for i in 1 2 3; do "$@" && return 0; echo "retry $i failed: $*" >&2; sleep $((i * 5)); done; return 1; }
+          for REPO in $REPOS; do
+            retry cosign sign --yes "${REPO}@${DIGEST}"
+          done
+
+      - name: Summary
+        run: |
+          echo "✅ Docker image created:" | tee -a $GITHUB_STEP_SUMMARY
+          for TGT in ${TARGETS//,/\ }; do
+            echo " - $TGT" | tee -a $GITHUB_STEP_SUMMARY
+          done
+
+  merge-images:
+    name: "Merge platform images into one"
+    needs: build-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write          # create the GitHub Release below
+      packages: write
+      id-token: write          # keyless cosign for the merged index
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge images
+        # imagetools (not `docker manifest`) — per-platform builds carry
+        # provenance/sbom as an OCI index; `docker manifest create` rejects
+        # those, imagetools merges them and preserves the attestations.
+        run: |
+          set -euo pipefail
+          retry() { for i in 1 2 3; do "$@" && return 0; echo "retry $i failed: $*" >&2; sleep $((i * 5)); done; return 1; }
+          for IMG_TAG in ${{ needs.build-image.outputs.RAW_IMG_TAGS }}; do
+            for REPO in $REPOS; do
+              TGT=${REPO}:${IMG_TAG}
+              # Fail loud if a per-platform child is missing (e.g. a matrix leg
+              # failed) rather than merging a stale tag from a previous run.
+              retry docker buildx imagetools inspect "$TGT-linux-amd64" >/dev/null
+              retry docker buildx imagetools inspect "$TGT-linux-arm64" >/dev/null
+              retry docker buildx imagetools create \
+                -t "$TGT" \
+                "$TGT-linux-amd64" \
+                "$TGT-linux-arm64"
+              echo "merged image $TGT" | tee -a $GITHUB_STEP_SUMMARY
+            done
+          done
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Sign merged multi-arch index
+        # Consumers pull by tag, which resolves to the INDEX digest — sign that
+        # too, or `cosign verify <repo>:<tag>` fails despite signed children.
+        run: |
+          set -euo pipefail
+          retry() { for i in 1 2 3; do "$@" && return 0; echo "retry $i failed: $*" >&2; sleep $((i * 5)); done; return 1; }
+          for IMG_TAG in ${{ needs.build-image.outputs.RAW_IMG_TAGS }}; do
+            for REPO in $REPOS; do
+              TGT=${REPO}:${IMG_TAG}
+              DIGEST=$(retry docker buildx imagetools inspect "$TGT" --format '{{.Manifest.Digest}}')
+              retry cosign sign --yes "${REPO}@${DIGEST}"
+              echo "signed index $TGT @ $DIGEST" | tee -a $GITHUB_STEP_SUMMARY
+            done
+          done
+
+      # Preinstalled gh CLI instead of a third-party release action.
+      # Only on tag pushes; skipped on workflow_dispatch.
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes
+          else
+            echo "Release ${GITHUB_REF_NAME} already exists; skipping."
+          fi

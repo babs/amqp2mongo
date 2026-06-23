@@ -6,6 +6,10 @@
     "bin": {
         "amqp2mongo": "amqp2mongo.js"
     },
+    "scripts": {
+        "check": "node --check amqp2mongo.js",
+        "lint": "eslint amqp2mongo.js test/"
+    },
     "dependencies": {
         "amqplib": "^0.10.5",
         "console-stamp": "^0.2.7",
