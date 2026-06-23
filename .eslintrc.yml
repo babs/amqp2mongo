@@ -1,9 +1,9 @@
 env:
   node: true
-  es6: true
+  es2021: true
 extends: 'eslint:recommended'
 parserOptions:
-  ecmaVersion: 8
+  ecmaVersion: 2021
 rules:
   no-console:
     - off

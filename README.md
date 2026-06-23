@@ -30,6 +30,43 @@ Configuration is taken from environment variables and `.env` file
 * `MONGOCOLLECTION`=collection
     > collection to store the messages to
 
+* `PREFETCH`=25
+    > AMQP prefetch (max in-flight unacked messages). Also drives the Mongo
+    > connection pool size (`maxPoolSize`). Default `25`.
+
+* `BATCH_SIZE`=25
+    > Messages written per bulk `insertMany`. Capped at `PREFETCH`. Default = `PREFETCH`.
+
+* `BATCH_MAX_WAIT_MS`=200
+    > Flush an under-full batch after this many ms of idle, so low-traffic
+    > messages aren't held back. Default `200`.
+
+* `RETRY_BACKOFF_MS`=1000
+    > Pause before requeueing a batch after an infrastructure write failure
+    > (e.g. MongoDB unreachable), to avoid hot-looping the broker. Default `1000`.
+
+## Throughput
+
+Messages are buffered and written in bulk (`insertMany`, unordered): one
+round-trip per batch instead of per message. Tune `PREFETCH` / `BATCH_SIZE` up
+for higher throughput — the practical ceiling is the target DocDB/Mongo instance
+CPU, not this process.
+
+## Reliability
+
+At-least-once. A message is acked only after its document is persisted, so a
+crash or disconnect mid-batch causes redelivery — and, since writes are not
+idempotent, possible duplicates. Failures are classified:
+
+* **Infrastructure** (connection/timeout): the batch is requeued and retried
+  after `RETRY_BACKOFF_MS` — no message loss.
+* **Per-document reject** (e.g. oversized/invalid doc): that message is `nack`ed
+  with `requeue=false`, i.e. routed to the queue's dead-letter exchange if one is
+  bound, otherwise dropped. **Bind a DLX** to avoid losing poison messages.
+
+`SIGTERM`/`SIGINT` stop consumption and flush the buffered batch before exit.
+The periodic `message processed` log reports `{ success, failure, requeued }`.
+
 ## Document
 
 ### format
@@ -40,12 +77,9 @@ Keys:
 * `content` Message payload interpreted if JSON, text if not
 * `error`: (optionnal) exception info if message can't be interpreted as JSON (contains self explaintatory `message` and `stack` keys)
 * `insertDate`: date when the message is processed by `amqp2mongo`
-* `messageDate`:date extraacted from the message headers `timestamp_in_ms` field ([rabbitmq-message-timestamp] plugin required)
 * `queue`: queue the message was consumed from
 * `properties`: message properties
 * `fields`: message fields
-
-[rabbitmq-message-timestamp]: <https://github.com/rabbitmq/rabbitmq-message-timestamp>
 
 ### examples 
 
@@ -70,7 +104,6 @@ Keys:
         "deliveryMode" : 2,
         "timestamp" : 1552767696
     },
-    "messageDate" : ISODate("2019-03-16T21:21:36.580+01:00"),
     "content" : {
         "test" : true
     }
@@ -98,11 +131,10 @@ Keys:
         "deliveryMode" : 2,
         "timestamp" : 1552767721
     },
-    "messageDate" : ISODate("2019-03-16T21:22:01.459+01:00"),
     "content" : "invalid json\n",
     "error" : {
         "message" : "Unexpected token i in JSON at position 0",
-        "stack" : "SyntaxError: Unexpected token i in JSON at position 0\n    at JSON.parse (<anonymous>)\n    at /tmp/amqp2mongo/amqp2mongo.js:80:37\n    at ConfirmChannel.BaseChannel.dispatchMessage (/tmp/amqp2mongo/node_modules/amqplib/lib/channel.js:478:12)\n    at ConfirmChannel.BaseChannel.handleDelivery (/tmp/amqp2mongo/node_modules/amqplib/lib/channel.js:487:15)\n    at ConfirmChannel.emit (events.js:182:13)\n    at /tmp/amqp2mongo/node_modules/amqplib/lib/channel.js:273:10\n    at ConfirmChannel.content [as handleMessage] (/tmp/amqp2mongo/node_modules/amqplib/lib/channel.js:326:9)\n    at ConfirmChannel.C.acceptMessageFrame (/tmp/amqp2mongo/node_modules/amqplib/lib/channel.js:241:31)\n    at ConfirmChannel.C.accept (/tmp/amqp2mongo/node_modules/amqplib/lib/channel.js:394:17)\n    at Connection.mainAccept [as accept] (/tmp/amqp2mongo/node_modules/amqplib/lib/connection.js:64:33)\n    at Socket.go (/tmp/amqp2mongo/node_modules/amqplib/lib/connection.js:478:48)\n    at Socket.emit (events.js:182:13)\n    at emitReadable_ (_stream_readable.js:534:12)\n    at process._tickCallback (internal/process/next_tick.js:63:19)",
+        "stack" : "SyntaxError: Unexpected token i in JSON at position 0\n    at JSON.parse (<anonymous>)\n    at ...",
         "code" : null
     }
 }

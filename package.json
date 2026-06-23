@@ -1,22 +1,18 @@
 {
     "name": "amqp2mongo",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Connects to a rabbitmq server, declare queue and bindings to the given exchange and consume messages, saving them to a mongodb collection",
     "repository": "https://github.com/babs/amqp2mongo",
     "bin": {
         "amqp2mongo": "amqp2mongo.js"
     },
     "dependencies": {
-        "amqplib": "^0.10.3",
+        "amqplib": "^0.10.5",
         "console-stamp": "^0.2.7",
-        "dotenv": "^6.2.0",
-        "mongodb": "^3.1.13",
-        "statsd-client": "^0.4.2"
+        "dotenv": "^16.4.7",
+        "mongodb": "^6.13.1"
     },
     "devDependencies": {
-        "eslint": "^5.11.0",
-        "eslint-config-airbnb-base": "^13.1.0",
-        "eslint-plugin-import": "^2.14.0",
-        "v8-profiler-node8": "^6.0.1"
+        "eslint": "^8.57.1"
     }
 }

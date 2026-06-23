@@ -5,8 +5,8 @@ WORKDIR /app
 COPY amqp2mongo.js package*.json Dockerfile ./
 
 RUN set -e \
-  && npm ci
+  && npm ci --omit=dev
 
 USER node
 
-CMD ["amqp2mongo.js"]
+CMD ["node", "amqp2mongo.js"]
