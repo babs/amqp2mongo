@@ -1,0 +1,6 @@
+# Defaults for nektos/act (local GitHub Actions runs).
+# Pin the runner image so act doesn't prompt for a size on first run.
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+# Do NOT auto-load ./.env — it holds real broker/DB credentials (gitignored) and
+# act would inject them over the job env, making the E2E hit the live broker.
+--env-file /dev/null

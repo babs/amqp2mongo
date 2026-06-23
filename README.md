@@ -67,6 +67,30 @@ idempotent, possible duplicates. Failures are classified:
 `SIGTERM`/`SIGINT` stop consumption and flush the buffered batch before exit.
 The periodic `message processed` log reports `{ success, failure, requeued }`.
 
+## Build & release
+
+CI (`.github/workflows/release.yml`) builds a multi-arch (`linux/amd64` +
+`linux/arm64`) image, publishes it to `ghcr.io/babs/amqp2mongo`, and signs it with
+cosign (keyless, Fulcio + Rekor). No registry secrets needed — GHCR auth is the
+workflow's `GITHUB_TOKEN`, signing is OIDC.
+
+* **Release** — push a semver tag:
+
+      git tag v1.2.3 && git push origin v1.2.3
+
+  Publishes `:1.2.3`, `:1.2`, `:1`, `:latest` and cuts a GitHub Release.
+  Pre-releases (`v1.2.3-rc1`) carry the suffix onto the truncated tags (`:1.2-rc1`…).
+
+* **Dev image** — a manual `workflow_dispatch` run builds `:latest` from the current
+  branch (no GitHub Release). Intended for a pre-tag dev image, so a dispatch
+  overwrites `:latest` on purpose.
+
+* **Verify a published image**:
+
+      cosign verify ghcr.io/babs/amqp2mongo:1.2.3 \
+        --certificate-identity-regexp 'https://github.com/babs/amqp2mongo/\.github/.*' \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
 ## Document
 
 ### format
