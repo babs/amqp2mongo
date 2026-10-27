@@ -3,6 +3,9 @@
     "version": "1.3.0",
     "description": "Connects to a rabbitmq server, declare queue and bindings to the given exchange and consume messages, saving them to a mongodb collection",
     "repository": "https://github.com/babs/amqp2mongo",
+    "engines": {
+        "node": ">=24"
+    },
     "bin": {
         "amqp2mongo": "amqp2mongo.js"
     },
