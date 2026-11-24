@@ -71,7 +71,9 @@ The periodic `message processed` log reports `{ success, failure, requeued }`.
 
 CI (`.github/workflows/release.yml`) builds a multi-arch (`linux/amd64` +
 `linux/arm64`) image, publishes it to `ghcr.io/babs/amqp2mongo`, and signs it with
-cosign (keyless, Fulcio + Rekor). No registry secrets needed — GHCR auth is the
+cosign (keyless, Fulcio + Rekor): the multi-arch index and every manifest under it,
+so a pull by tag or by platform digest verifies. `unsigned-staging` is a CI scratch
+tag: never deploy it. No registry secrets needed — GHCR auth is the
 workflow's `GITHUB_TOKEN`, signing is OIDC.
 
 * **Release** — push a semver tag:
